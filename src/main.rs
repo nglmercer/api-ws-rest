@@ -64,7 +64,9 @@ impl WebSocketServer {
     }
 }
 
+
 async fn handle_webhook(body: Value, ws_server: WebSocketServer) -> Result<impl warp::Reply, warp::Rejection> {
+    info!("Received webhook: {:?}", body);
     // Properly handle the Result returned by broadcast
     if let Err(e) = ws_server.broadcast(body).await {
         error!("Error broadcasting message: {}", e);
@@ -72,6 +74,7 @@ async fn handle_webhook(body: Value, ws_server: WebSocketServer) -> Result<impl 
     }
     Ok(warp::reply::with_status("Message broadcasted", warp::http::StatusCode::OK))
 }
+
 
 #[tokio::main]
 async fn main() {
