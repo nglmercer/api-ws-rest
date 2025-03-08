@@ -65,14 +65,23 @@ impl WebSocketServer {
 }
 
 
-async fn handle_webhook(body: Value, ws_server: WebSocketServer) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_webhook(body: Value, ws_server: WebSocketServer) -> Result<warp::reply::WithStatus<String>, warp::Rejection> {
     info!("Received webhook: {:?}", body);
-    // Properly handle the Result returned by broadcast
-    if let Err(e) = ws_server.broadcast(body).await {
-        error!("Error broadcasting message: {}", e);
-        return Ok(warp::reply::with_status("Error broadcasting message", warp::http::StatusCode::INTERNAL_SERVER_ERROR));
+    
+    // Check if the body is a valid JSON object with the expected structure
+    if let Some(_obj) = body.as_object() {
+        // If the body is already a properly formatted JSON object, broadcast it
+        if let Err(e) = ws_server.broadcast(body).await {
+            error!("Error broadcasting message: {}", e);
+            return Ok(warp::reply::with_status(format!("Error broadcasting message: {}", e), warp::http::StatusCode::INTERNAL_SERVER_ERROR));
+        }
+    } else {
+        // If the body is not a valid JSON object, return an error
+        error!("Invalid webhook payload format");
+        return Ok(warp::reply::with_status("Invalid webhook payload format: expected a JSON object".to_string(), warp::http::StatusCode::BAD_REQUEST));
     }
-    Ok(warp::reply::with_status("Message broadcasted", warp::http::StatusCode::OK))
+    
+    Ok(warp::reply::with_status("Message broadcasted".to_string(), warp::http::StatusCode::OK))
 }
 
 
@@ -125,15 +134,34 @@ async fn main() {
 
     let webhook_route = warp::post()
         .and(warp::path("webhook"))
-        .and(warp::body::json())
+        .and(warp::body::content_length_limit(1024 * 16))
+        .and(warp::body::bytes())
         .and(warp::any().map(move || ws_server_clone.clone()))
-        .and_then(handle_webhook);
+        .and_then(|body_bytes: bytes::Bytes, server| async move {
+            // Try to parse the JSON manually to handle deserialization errors
+            let result = serde_json::from_slice::<Value>(&body_bytes);
+            match result {
+                Ok(json) => handle_webhook(json, server).await,
+                Err(e) => {
+                    error!("JSON parsing error: {:?}", e);
+                    // Return the same type as handle_webhook
+                    Ok(warp::reply::with_status(
+                        format!("Invalid JSON format: {}", e).to_string(),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    ))
+                }
+            }
+        });
+
 
     let cors = warp::cors()
         .allow_any_origin()
-        .allow_methods(vec!["GET", "POST", "OPTIONS"])
-        .allow_headers(vec!["Content-Type", "Authorization"])
-        .max_age(3600);
+        .allow_methods(vec!["GET", "POST", "OPTIONS", "PUT", "DELETE"])
+        .allow_headers(vec!["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"])
+        .expose_headers(vec!["Access-Control-Allow-Origin"])
+        .allow_credentials(true)
+        .max_age(3600)
+        .build();
 
     // Combine all routes first, then apply CORS
     let routes = ws_route
