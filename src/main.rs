@@ -141,11 +141,11 @@ async fn main() {
         .or(webhook_route)
         .with(cors);
 
-    info!("Server running on ws://0.0.0.0:3030");
     let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| "3030".to_string())
+        .unwrap_or_else(|_| "8080".to_string())
         .parse()
         .expect("PORT must be a number");
+    info!("Server running on ws://0.0.0.0:{}", port);
 
     // Vincular a todas las interfaces
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
